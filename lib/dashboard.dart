@@ -1,6 +1,4 @@
-
-
-import 'dart:convert'; // For JSON decoding
+import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -30,7 +28,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _initializeFromArguments() {
-    final args = ModalRoute.of(context)?.settings.arguments as Map<String, String>?;
+    final args =
+        ModalRoute.of(context)?.settings.arguments as Map<String, String>?;
     if (args != null) {
       _locationController.text = args['placeName'] ?? '';
       startDate = args['startDate'] ?? '';
@@ -82,8 +81,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
           try {
             final jsonData = jsonDecode(jsonResponse);
 
+            // Add a timestamp field to the data
+            final dataWithTimestamp = {
+              'data': jsonData,
+              'timestamp':
+                  FieldValue.serverTimestamp(), // Firebase server timestamp
+            };
+
             // Attempt to upload data to Firestore
-            await FirebaseFirestore.instance.collection('travelPlans').add(jsonData);
+            await FirebaseFirestore.instance
+                .collection('travelPlans')
+                .add(dataWithTimestamp);
 
             setState(() {
               _responseText = 'Travel plan uploaded successfully!';
@@ -137,13 +145,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       appBar: AppBar(
         title: Text('Generative AI Travel Planner'),
       ),
-      // body: StreamBuilder<QuerySnapshot>(
-      //   stream: FirebaseFirestore.instance.collection('travelPlans').snapshots(),
-      body:StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('travelPlans')
-          .limit(1) // Limit to the most recent document
-          .snapshots(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('travelPlans')
+            .orderBy('timestamp', descending: true) // Order by timestamp
+            .limit(1) // Limit to the latest document
+            .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator());
@@ -169,26 +176,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
               print('Travel Plan Data: $travelPlanData');
 
               // Safely access nested data with type checks
-              final travelPlansList = travelPlanData['travel_plans'] as List<dynamic>? ?? [];
-              final flightDetailsList = travelPlansList.isNotEmpty ? travelPlansList[0]['flight_details'] as Map<String, dynamic>? : {};
+              final travelPlansList =
+                  travelPlanData['data']['travel_plans'] as List<dynamic>? ??
+                      [];
+              final flightDetailsList = travelPlansList.isNotEmpty
+                  ? travelPlansList[0]['flight_details']
+                      as Map<String, dynamic>?
+                  : {};
 
               if (flightDetailsList != null) {
                 print('Flight Details: $flightDetailsList');
               }
 
               // Ensure 'hotel_options' exists and is a List before casting
-              final hotelOptionsList = (travelPlansList.isNotEmpty ? travelPlansList[0]['hotel_options'] as List<dynamic>? : []) ?? [];
-              final firstHotelOption = hotelOptionsList.isNotEmpty ? hotelOptionsList[0] as Map<String, dynamic>? : {};
+              final hotelOptionsList = (travelPlansList.isNotEmpty
+                      ? travelPlansList[0]['hotel_options'] as List<dynamic>?
+                      : []) ??
+                  [];
+              final firstHotelOption = hotelOptionsList.isNotEmpty
+                  ? hotelOptionsList[0] as Map<String, dynamic>?
+                  : {};
 
               return ListTile(
-                leading: firstHotelOption != null && firstHotelOption['hotel_image_url'] != null
+                leading: firstHotelOption != null &&
+                        firstHotelOption['hotel_image_url'] != null
                     ? Image.network(
                         firstHotelOption['hotel_image_url'],
                         width: 50,
                         height: 50,
                         fit: BoxFit.cover,
                       )
-                    : SizedBox(width: 50, height: 50), // Placeholder if image is null
+                    : SizedBox(
+                        width: 50, height: 50), // Placeholder if image is null
                 title: Text(
                   firstHotelOption?['hotel_name'] ?? 'No name',
                   style: TextStyle(fontSize: 14),
