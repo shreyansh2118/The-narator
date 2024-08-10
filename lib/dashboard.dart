@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class DashboardScreen extends StatefulWidget {
   @override
@@ -17,6 +17,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _budgetOption = 'Luxury';
   String startDate = '';
   String endDate = '';
+  String travelerType = '';
 
   final List<String> _budgetOptions = ['Cheap', 'Moderate', 'Luxury'];
 
@@ -35,6 +36,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       startDate = args['startDate'] ?? '';
       endDate = args['endDate'] ?? '';
       _budgetOption = args['budgetType'] ?? 'Luxury';
+      travelerType = args['travelerType'] ?? '';
 
       if (startDate.isNotEmpty && endDate.isNotEmpty) {
         final start = DateTime.parse(startDate);
@@ -51,13 +53,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
 
     final apiKey = 'AIzaSyCvIHgAa_iP9CwtuhmHTKTzslf5ifgKn90';
-    if (apiKey == null) {
-      setState(() {
-        _responseText = 'No API_KEY environment variable';
-        _isLoading = false;
-      });
-      return;
-    }
 
     try {
       final model = GenerativeModel(model: 'gemini-1.5-flash', apiKey: apiKey);
@@ -66,7 +61,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final budget = _budgetOption;
 
       final prompt =
-          "Generate best two travel plans for location: $location, for $days Days and ${int.parse(days) - 1} Nights for Family with a $budget budget. Include the following details: 1. Flight details: Flight price with booking URL. 2. Hotels options list with Hotel Name, Hotel address, price, hotel image URL, rating, description. 3. Places to visit nearby with Place Name, Place Details, Place Image URL, Geo coordinates, Ticket pricing, Time to travel to each location. 4. Create a day-by-day itinerary for $days days and ${int.parse(days) - 1} nights with the best time to visit. Format the response in JSON and do not provide any comment line in between the response";
+          "Generate best two travel plans for location: $location, for $days Days and ${int.parse(days) - 1} Nights for $travelerType with a $budget budget. Include the following details: 1. Flight details: Flight price with booking URL. 2. Hotels options list with Hotel Name, Hotel address, price, hotel image URL, rating, description. 3. Places to visit nearby with Place Name, Place Details, Place Image URL, Geo coordinates, Ticket pricing, Time to travel to each location. 4. Create a day-by-day itinerary for $days days and ${int.parse(days) - 1} nights with the best time to visit. Format the response in JSON and do not provide any comment line in between the response";
 
       final content = [Content.text(prompt)];
       final response = await model.generateContent(content);
@@ -74,21 +69,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (response.text != null) {
         print('Raw Response: ${response.text}');
 
-        // Attempt to extract and format JSON response
         final jsonResponse = _extractJsonFromResponse(response.text!);
 
         if (jsonResponse.isNotEmpty) {
           try {
             final jsonData = jsonDecode(jsonResponse);
 
-            // Add a timestamp field to the data
             final dataWithTimestamp = {
               'data': jsonData,
-              'timestamp':
-                  FieldValue.serverTimestamp(), // Firebase server timestamp
+              'timestamp': FieldValue.serverTimestamp(),
             };
 
-            // Attempt to upload data to Firestore
             await FirebaseFirestore.instance
                 .collection('travelPlans')
                 .add(dataWithTimestamp);
@@ -126,102 +117,430 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _extractJsonFromResponse(String response) {
-    // Use a regular expression to find the JSON content between the first '{' and the last '}'
     final jsonStart = response.indexOf('{');
     final jsonEnd = response.lastIndexOf('}');
 
     if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-      // Extract and return the JSON substring
       return response.substring(jsonStart, jsonEnd + 1);
     } else {
-      // Return an empty string if no valid JSON is found
       return '';
+    }
+  }
+
+  void _launchURL(String url) async {
+    if (await canLaunch(url)) {
+      await launch(url);
+    } else {
+      throw 'Could not launch $url';
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Generative AI Travel Planner'),
+        title: const Text('Generative AI Travel Planner'),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('travelPlans')
-            .orderBy('timestamp', descending: true) // Order by timestamp
-            .limit(1) // Limit to the latest document
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(child: Text('No travel plans available.'));
-          }
-
-          final travelPlans = snapshot.data!.docs;
-
-          return ListView.builder(
-            itemCount: travelPlans.length,
-            itemBuilder: (context, index) {
-              final travelPlan = travelPlans[index];
-              final travelPlanData = travelPlan.data() as Map<String, dynamic>;
-
-              // Print the entire travelPlanData to debug
-              print('Travel Plan Data: $travelPlanData');
-
-              // Safely access nested data with type checks
-              final travelPlansList =
-                  travelPlanData['data']['travel_plans'] as List<dynamic>? ??
-                      [];
-              final flightDetailsList = travelPlansList.isNotEmpty
-                  ? travelPlansList[0]['flight_details']
-                      as Map<String, dynamic>?
-                  : {};
-
-              if (flightDetailsList != null) {
-                print('Flight Details: $flightDetailsList');
-              }
-
-              // Ensure 'hotel_options' exists and is a List before casting
-              final hotelOptionsList = (travelPlansList.isNotEmpty
-                      ? travelPlansList[0]['hotel_options'] as List<dynamic>?
-                      : []) ??
-                  [];
-              final firstHotelOption = hotelOptionsList.isNotEmpty
-                  ? hotelOptionsList[0] as Map<String, dynamic>?
-                  : {};
-
-              return ListTile(
-                leading: firstHotelOption != null &&
-                        firstHotelOption['hotel_image_url'] != null
-                    ? Image.network(
-                        firstHotelOption['hotel_image_url'],
-                        width: 50,
-                        height: 50,
-                        fit: BoxFit.cover,
-                      )
-                    : SizedBox(
-                        width: 50, height: 50), // Placeholder if image is null
-                title: Text(
-                  firstHotelOption?['hotel_name'] ?? 'No name',
-                  style: TextStyle(fontSize: 14),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              Container(
+                height: screenHeight / 3,
+                width: double.infinity,
+                child: Image.network(
+                  'https://freepngimg.com/thumb/travel/168139-travel-free-photo.png',
+                  fit: BoxFit.cover,
                 ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Price: ${firstHotelOption?['price'] ?? 'Unknown'}'),
-                  ],
+              ),
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(20.0),
+                      topRight: Radius.circular(20.0),
+                    ),
+                    border: Border.all(
+                      color: Colors.black,
+                      width: 2,
+                    ),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('travelPlans')
+                        .orderBy('timestamp', descending: true)
+                        .limit(1)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      if (snapshot.hasError) {
+                        return Center(child: Text('Error: ${snapshot.error}'));
+                      }
+
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const Center(
+                            child:
+                                Text('No travel plans available. Try again.'));
+                      }
+
+                      final travelPlans = snapshot.data!.docs;
+
+                      return ListView.builder(
+                        itemCount: travelPlans.length,
+                        itemBuilder: (context, index) {
+                          final travelPlan = travelPlans[index];
+                          final travelPlanData =
+                              travelPlan.data() as Map<String, dynamic>;
+
+                          final travelPlansList = travelPlanData['data']
+                                  ['travel_plans'] as List<dynamic>? ??
+                              [];
+                          final flightDetailsList = travelPlansList.isNotEmpty
+                              ? travelPlansList[0]['flight_details']
+                                  as Map<String, dynamic>?
+                              : {};
+                          final hotelOptionsList = travelPlansList.isNotEmpty
+                              ? travelPlansList[0]['hotel_options']
+                                      as List<dynamic>? ??
+                                  []
+                              : [];
+                          final planName = travelPlansList.isNotEmpty
+                              ? travelPlansList[0]['plan_name'] as String?
+                              : '';
+                          final plandesc = travelPlansList.isNotEmpty
+                              ? travelPlansList[0]['plan_description']
+                                  as String?
+                              : '';
+
+                          final formattedStartDate = DateTime.parse(startDate);
+                          final formattedEndDate = DateTime.parse(endDate);
+                          final formattedStartDateStr =
+                              "${formattedStartDate.day}-${formattedStartDate.month}-${formattedStartDate.year}";
+                          final formattedEndDateStr =
+                              "${formattedEndDate.day}-${formattedEndDate.month}-${formattedEndDate.year}";
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Location: ${_locationController.text}',
+                                style: const TextStyle(
+                                    fontSize: 18,
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '${plandesc ?? 'No description available'}',
+                                style: const TextStyle(
+                                    fontSize: 14, color: Colors.black),
+                              ),
+                              Text(
+                                '$formattedStartDateStr to $formattedEndDateStr',
+                                style: const TextStyle(
+                                    fontSize: 16, color: Colors.black),
+                              ),
+                              Row(
+                                children: [
+                                  const Icon(Icons.bike_scooter),
+                                  Text(
+                                    ' $travelerType',
+                                    style: const TextStyle(
+                                        fontSize: 16, color: Colors.black),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Container(
+                                decoration: BoxDecoration(
+                                    border: Border.all(
+                                        color: Colors.black, width: 1)),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(6.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Image.asset('assets/airplane.png',
+                                                  width: 40,
+                                                  height: 30,
+                                                  fit: BoxFit.cover),
+                                              const SizedBox(width: 10),
+                                              const Text("Flights",
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      fontSize: 20)),
+                                            ],
+                                          ),
+                                          ElevatedButton(
+                                            onPressed: () {
+                                              if (flightDetailsList != null &&
+                                                  flightDetailsList!
+                                                      .containsKey(
+                                                          'booking_url')) {
+                                                // Open the booking URL
+                                                launch(flightDetailsList![
+                                                    'booking_url']);
+                                              }
+                                            },
+                                            child: const Text("Book flight"),
+                                          ),
+                                        ],
+                                      ),
+                                      Text(
+                                        'Airline: ${planName ?? 'No name'}',
+                                        style: const TextStyle(
+                                            fontSize: 14, color: Colors.black),
+                                      ),
+                                      Text(
+                                          'Price: ${flightDetailsList?['flight_price'] ?? 'Unknown'}'),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              // Display hotel options
+                              ...hotelOptionsList.map((hotelOption) {
+                                final hotelName =
+                                    hotelOption['hotel_name'] ?? 'No name';
+                                final hotelPrice =
+                                    hotelOption['price'] ?? 'Unknown';
+                                final hotelRating =
+                                    hotelOption['rating'] ?? 'Unknown';
+                                final hotelImage =
+                                    hotelOption['image_url'] ?? '';
+
+                                return ListTile(
+                                  title: Text(
+                                    hotelName,
+                                    style: const TextStyle(
+                                        fontSize: 14, color: Colors.black),
+                                  ),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Price: $hotelPrice/night',
+                                          style: const TextStyle(
+                                              color: Colors.black)),
+                                      Text('Rating: $hotelRating',
+                                          style: const TextStyle(
+                                              color: Colors.black)),
+                                      if (hotelImage.isNotEmpty)
+                                        Image.network(hotelImage,
+                                            height: 100, fit: BoxFit.cover),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                              const SizedBox(height: 16),
+                              // Display itinerary day by day
+                              ...travelPlansList.map((plan) {
+                                final itinerary =
+                                    plan['itinerary'] as List<dynamic>? ?? [];
+                                final placesToVisit =
+                                    plan['places_to_visit'] as List<dynamic>? ??
+                                        [];
+
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ...itinerary.map((dayPlan) {
+                                      final day = dayPlan['day'];
+                                      final activities = dayPlan['activities']
+                                              as List<dynamic>? ??
+                                          [];
+
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          // Text('$day:',
+                                          //     style: const TextStyle(
+                                          //         fontSize: 16,
+                                          //         color: Colors.black,
+                                          //         fontWeight: FontWeight.bold)),
+                                          ...activities.map((activity) {
+                                            final time = activity['time'];
+                                            final activityName =
+                                                activity['activity'];
+                                            final details = activity['details'];
+                                            final imageUrl =
+                                                activity['image_url'];
+                                            final location = activity[
+                                                        'location']
+                                                    as Map<String, dynamic>? ??
+                                                {};
+                                            final locationName =
+                                                location['name'] ?? 'No name';
+                                            final coordinates =
+                                                location['coordinates'] ??
+                                                    'Unknown';
+                                            final ticketPrice =
+                                                location['ticket_price'] ??
+                                                    'Unknown';
+                                            final travelTime =
+                                                location['travel_time'] ??
+                                                    'Unknown';
+
+                                            return Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 4.0),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    '$time: $activityName',
+                                                    style: const TextStyle(
+                                                        fontSize: 14,
+                                                        color: Colors.black,
+                                                        fontWeight:
+                                                            FontWeight.bold),
+                                                  ),
+                                                  Text('Details: $details',
+                                                      style: const TextStyle(
+                                                          fontSize: 14,
+                                                          color: Colors.black)),
+                                                  if (imageUrl.isNotEmpty)
+                                                    Image.network(imageUrl,
+                                                        height: 100,
+                                                        fit: BoxFit.cover),
+                                                  Text(
+                                                      'Location: $locationName',
+                                                      style: const TextStyle(
+                                                          fontSize: 14,
+                                                          color: Colors.black)),
+                                                  Text(
+                                                      'Coordinates: $coordinates',
+                                                      style: const TextStyle(
+                                                          fontSize: 14,
+                                                          color: Colors.black)),
+                                                  Text(
+                                                      'Ticket Price: $ticketPrice',
+                                                      style: const TextStyle(
+                                                          fontSize: 14,
+                                                          color: Colors.black)),
+                                                  Text(
+                                                      'Travel Time: $travelTime',
+                                                      style: const TextStyle(
+                                                          fontSize: 14,
+                                                          color: Colors.black)),
+                                                  const SizedBox(height: 8),
+                                                ],
+                                              ),
+                                            );
+                                          }).toList(),
+                                          const SizedBox(height: 16),
+                                        ],
+                                      );
+                                    }).toList(),
+                                    const SizedBox(height: 16),
+                                    // Display places to visit
+                                    const Text(
+                                      'Places to Visit:',
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          color: Colors.black,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    ...placesToVisit.map((place) {
+                                      final placeName =
+                                          place['place_name'] ?? 'No name';
+                                      final placeDetails =
+                                          place['place_details'] ??
+                                              'No details';
+                                      final placeImageUrl =
+                                          place['place_image_url'] ?? '';
+                                      final geoCoordinates =
+                                          place['geo_coordinates'] ?? 'Unknown';
+                                      final ticketPricing =
+                                          place['ticket_pricing'] ?? 'Unknown';
+                                      final timeToTravel =
+                                          place['time_to_travel'] ?? 'Unknown';
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 4.0),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              placeName,
+                                              style: const TextStyle(
+                                                  fontSize: 16,
+                                                  color: Colors.black,
+                                                  fontWeight: FontWeight.bold),
+                                            ),
+                                            Text('Details: $placeDetails',
+                                                style: const TextStyle(
+                                                    fontSize: 14,
+                                                    color: Colors.black)),
+                                            if (placeImageUrl.isNotEmpty)
+                                              Image.network(placeImageUrl,
+                                                  height: 100,
+                                                  fit: BoxFit.cover),
+                                            Text('Coordinates: $geoCoordinates',
+                                                style: const TextStyle(
+                                                    fontSize: 14,
+                                                    color: Colors.black)),
+                                            Text(
+                                                'Ticket Pricing: $ticketPricing',
+                                                style: const TextStyle(
+                                                    fontSize: 14,
+                                                    color: Colors.black)),
+                                            Text('Travel Time: $timeToTravel',
+                                                style: const TextStyle(
+                                                    fontSize: 14,
+                                                    color: Colors.black)),
+                                            const SizedBox(height: 8),
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ],
+                                );
+                              }).toList(),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
-              );
-            },
-          );
-        },
+              ),
+            ],
+          ),
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
+          if (_responseText.isEmpty)
+            Positioned(
+              bottom: 20,
+              left: 20,
+              child: Text(
+                _responseText,
+                style: const TextStyle(color: Colors.red, fontSize: 16),
+              ),
+            ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _generateTravelPlan,
+        child: const Icon(Icons.refresh),
       ),
     );
   }
