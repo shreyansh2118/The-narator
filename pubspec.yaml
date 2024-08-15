@@ -41,7 +41,13 @@ dependencies:
   firebase_core: 
   cloud_firestore:
   firebase_auth: 
-  url_launcher:
+  image_picker:
+  firebase_storage:
+  get:
+  share_plus:
+  flutter_tts:
+  cached_network_image:
+
   
 
 dev_dependencies:
