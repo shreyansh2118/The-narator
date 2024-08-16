@@ -1,47 +1,43 @@
 import 'package:aitravelplanner/addStory/addstory.dart';
+import 'package:aitravelplanner/dashboard/controller.dart';
+import 'package:aitravelplanner/dashboard/model.dart';
 import 'package:aitravelplanner/profile/profile.dart';
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:aitravelplanner/texToSpeech/controller.dart';
 import 'package:aitravelplanner/texToSpeech/textTospeech.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
 
-
-class DashboardScreen extends StatefulWidget {
+class DashboardScreen extends StatelessWidget {
   final String userId;
+  final RxInt _currentIndex = 0.obs; // Define _currentIndex as Rx<int>
 
   DashboardScreen({required this.userId});
 
   @override
-  _DashboardScreenState createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends State<DashboardScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  int _currentIndex = 0; // Set initial index to HomePage
-
-  @override
   Widget build(BuildContext context) {
+    final dashboardController storyController = Get.put(dashboardController());
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('Story Dashboard'),
+        title: const Text('Story Dashboard'),
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: [
-          // HomePage(),
-          _buildDashboardContent(),
-          AddStoryPage(),
-          ProfilePage(),
-        ],
-      ),
+      body: Obx(() {
+        return IndexedStack(
+          index: _currentIndex.value,
+          children: [
+            _buildDashboardContent(storyController),
+            AddStoryPage(),
+            ProfileScreen(),
+          ],
+        );
+      }),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
+        currentIndex: _currentIndex.value,
         onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
+          _currentIndex.value = index;
         },
-        items: [
+        items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.dashboard),
             label: 'Dashboard',
@@ -59,7 +55,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildDashboardContent() {
+  Widget _buildDashboardContent(dashboardController controller) {
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: ListView(
@@ -67,146 +63,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _buildSection(
             title: 'Horror',
             collectionName: 'Horror',
-            context: context,
+            controller: controller,
           ),
           _buildSection(
             title: 'Sci-Fi',
             collectionName: 'Sci-Fi',
-            context: context,
+            controller: controller,
           ),
           _buildSection(
-            title: 'Fantasy', // New Collection
+            title: 'Fantasy',
             collectionName: 'Fantasy',
-            context: context,
+            controller: controller,
           ),
         ],
       ),
     );
   }
 
-  // Function to add a new story to the "Fantasy" collection
-  void addNewStory() async {
-    String collectionName = 'Fantasy'; // Fixed to 'Fantasy'
-    String documentId = _firestore.collection(collectionName).doc().id; // Generates a unique document ID
-
-    // Define the data to be added
-    Map<String, dynamic> storyData = {
-      'title': 'A Mysterious Journey',
-      'description': 'An epic adventure unfolds in a world full of magic and wonder.',
-      'img': 'https://example.com/image.png', // Replace with your image URL
-      'author': 'John Doe',
-      'type': 'Fantasy',
-      'userLikes': {}, // Initially, no likes
-      'userDislikes': {}, // Initially, no dislikes
-    };
-
-    try {
-      // Add the document to the collection
-      await _firestore.collection(collectionName).doc(documentId).set(storyData);
-      print('New story added successfully to the $collectionName collection!');
-    } catch (e) {
-      print('Failed to add new story: $e');
-    }
-  }
-
   Widget _buildSection({
     required String title,
     required String collectionName,
-    required BuildContext context,
+    required dashboardController controller,
   }) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection(collectionName).snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator());
-        }
+    controller.fetchStories(collectionName, _getStoryList(title));
 
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
+    return Obx(() {
+      final stories = _getStoryList(title);
 
-        if (!snapshot.hasData || snapshot.data?.docs.isEmpty == true) {
-          return Center(child: Text('No $title stories available.'));
-        }
-
-        final stories = snapshot.data!.docs;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Text(
-                title,
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            SizedBox(
-              height: 200, // Adjust the height based on your card size
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: stories.length > 3 ? 3 : stories.length,
-                itemBuilder: (context, index) {
-                  final story = stories[index].data() as Map<String, dynamic>;
-                  final storyId = stories[index].id;
-                  final userLikes = story['userLikes'] as Map<String, dynamic>? ?? {};
-                  final userDislikes = story['userDislikes'] as Map<String, dynamic>? ?? {};
-
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: StoryCard(
-                      title: story['title'] ?? 'No Title',
-                      description: story['description'] ?? 'No Description',
-                      imageUrl: story['img'] ?? '',
-                      author: story['author'] ?? 'Unknown',
-                      type: story['type'] ?? 'Unknown',
-                      likes: userLikes.length,
-                      dislikes: userDislikes.length,
-                      userLiked: userLikes.containsKey(widget.userId),
-                      userDisliked: userDislikes.containsKey(widget.userId),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TextToAudioScreen(
-                              title: story['title'] ?? 'No Title',
-                              description: story['description'] ?? 'No Description',
-                              type: story['type'] ?? 'Unknown',
-                              image: story['img'] ?? '',
-                              storyId: storyId,
-                            ),
+          ),
+          SizedBox(
+            height: 200,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: stories.length > 3 ? 3 : stories.length,
+              itemBuilder: (context, index) {
+                final story = stories[index];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: StoryCard(
+                    title: story.title,
+                    description: story.description,
+                    imageUrl: story.imageUrl,
+                    author: story.author,
+                    type: story.type,
+                    likes: story.userLikes.length,
+                    dislikes: story.userDislikes.length,
+                    userLiked: story.userLikes.containsKey(userId),
+                    userDisliked: story.userDislikes.containsKey(userId),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TextToAudioScreen(
+                            title: story.title,
+                            description: story.description,
+                            type: story.type,
+                            image: story.imageUrl,
+                            storyId: story.id,
                           ),
-                        );
-                      },
-                      onLike: () async {
-                        if (userDislikes.containsKey(widget.userId)) {
-                          await _firestore.collection(collectionName).doc(storyId).update({
-                            'userDislikes.${widget.userId}': FieldValue.delete(),
-                          });
-                        }
-                        await _firestore.collection(collectionName).doc(storyId).update({
-                          'userLikes.${widget.userId}': true,
-                        });
-                      },
-                      onDislike: () async {
-                        if (userLikes.containsKey(widget.userId)) {
-                          await _firestore.collection(collectionName).doc(storyId).update({
-                            'userLikes.${widget.userId}': FieldValue.delete(),
-                          });
-                        }
-                        await _firestore.collection(collectionName).doc(storyId).update({
-                          'userDislikes.${widget.userId}': true,
-                        });
-                      },
-                    ),
-                  );
-                },
-              ),
+                        ),
+                      );
+                    },
+                    onLike: () async {
+                      await controller.likeStory(collectionName, story, userId);
+                    },
+                    onDislike: () async {
+                      await controller.dislikeStory(collectionName, story, userId);
+                    },
+                  ),
+                );
+              },
             ),
-          ],
-        );
-      },
-    );
+          ),
+        ],
+      );
+    });
+  }
+
+  RxList<dashboardStory> _getStoryList(String title) {
+    switch (title) {
+      case 'Horror':
+        return Get.find<dashboardController>().horrorStories;
+      case 'Sci-Fi':
+        return Get.find<dashboardController>().sciFiStories;
+      case 'Fantasy':
+        return Get.find<dashboardController>().fantasyStories;
+      default:
+        return <dashboardStory>[].obs;
+    }
   }
 }
 
@@ -246,62 +199,65 @@ class StoryCard extends StatelessWidget {
       child: Card(
         elevation: 5,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10.0),
+          borderRadius: BorderRadius.circular(25.0),
         ),
-        child: Stack(
-          children: [
-            CachedNetworkImage(
-              imageUrl: imageUrl,
-              fit: BoxFit.cover,
-              width: 150, // Set fixed width to align the cards
-              height: double.infinity,
-              placeholder: (context, url) =>
-                  Center(child: CircularProgressIndicator()),
-              errorWidget: (context, url, error) => Icon(Icons.error),
-            ),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                color: Colors.black54,
-                padding: EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(25.0),
+          child: Stack(
+            children: [
+              CachedNetworkImage(
+                imageUrl: imageUrl,
+                fit: BoxFit.cover,
+                width: 150,
+                height: double.infinity,
+                placeholder: (context, url) =>
+                    const Center(child: CircularProgressIndicator()),
+                errorWidget: (context, url, error) => const Icon(Icons.error),
+              ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  color: Colors.black54,
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      description.length > 22
-                          ? '${description.substring(0, 28)}...'
-                          : description,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
+                      const SizedBox(height: 4),
+                      Text(
+                        description.length > 22
+                            ? '${description.substring(0, 28)}...'
+                            : description,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'By $author',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
+                      const SizedBox(height: 8),
+                      Text(
+                        'By $author',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

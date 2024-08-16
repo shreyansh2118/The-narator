@@ -12,10 +12,30 @@ class StoryController extends GetxController {
   RxInt dislikes = 0.obs;
   RxBool isPlaying = false.obs;
   RxBool isPaused = false.obs;
+  RxBool isFavorite = false.obs;
   RxString text = ''.obs;
   RxString highlightedText = ''.obs; // For highlighting text
 
   FlutterTts flutterTts = FlutterTts();
+
+  @override
+  void onInit() {
+    super.onInit();
+    flutterTts.setStartHandler(() {
+      highlightedText.value = '';
+    });
+
+    flutterTts.setProgressHandler((String text, int startOffset, int endOffset, String word) {
+      highlightedText.value = text.substring(startOffset, endOffset);
+    });
+
+    flutterTts.setCompletionHandler(() {
+      isPlaying.value = false;
+      isPaused.value = false;
+      highlightedText.value = ''; // Clear highlight after completion
+    });
+  }
+
 
   // Fetch likes and dislikes
   void fetchLikesDislikes(String storyId) async {
@@ -23,6 +43,49 @@ class StoryController extends GetxController {
     if (storyDoc.exists) {
       likes.value = storyDoc['likes'] ?? 0;
       dislikes.value = storyDoc['dislikes'] ?? 0;
+    }
+  }
+
+  // Check if the story is already marked as favorite
+  void checkIfFavorite(String storyId) async {
+    String userId = _auth.currentUser!.uid;
+    DocumentSnapshot doc = await _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('favorites')
+        .doc(storyId)
+        .get();
+
+    if (doc.exists) {
+      isFavorite.value = true;
+    } else {
+      isFavorite.value = false;
+    }
+  }
+
+  // Toggle favorite status
+  void toggleFavorite(String storyId, String title, String description, String image) async {
+    String userId = _auth.currentUser!.uid;
+    DocumentReference docRef = _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('favorites')
+        .doc(storyId);
+
+    if (isFavorite.value) {
+      // Remove from favorites
+      await docRef.delete();
+      isFavorite.value = false;
+    } else {
+      // Add to favorites
+      await docRef.set({
+        'storyId': storyId,
+        'title': title,
+        'description': description,
+        'image': image,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+      isFavorite.value = true;
     }
   }
 
@@ -34,20 +97,6 @@ class StoryController extends GetxController {
       await flutterTts.speak(text);
       isPlaying.value = true;
       isPaused.value = false;
-
-      flutterTts.setStartHandler(() {
-        highlightedText.value = '';
-      });
-
-      flutterTts.setProgressHandler((String text, int startOffset, int endOffset, String word) {
-        highlightedText.value = text.substring(startOffset, endOffset);
-      });
-
-      flutterTts.setCompletionHandler(() {
-        isPlaying.value = false;
-        isPaused.value = false;
-        highlightedText.value = ''; // Clear highlight after completion
-      });
     }
   }
 

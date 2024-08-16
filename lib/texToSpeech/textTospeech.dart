@@ -3,6 +3,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:get/get.dart';
 import 'package:share_plus/share_plus.dart'; // Import the share_plus package
 import 'controller.dart'; // Import the StoryController
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 
 class TextToAudioScreen extends StatelessWidget {
   final String title;
@@ -24,6 +25,7 @@ class TextToAudioScreen extends StatelessWidget {
     final StoryController storyController = Get.put(StoryController());
     storyController.text.value = "$title\n\n$description";
     storyController.fetchLikesDislikes(storyId);
+    storyController.checkIfFavorite(storyId);
 
     return Scaffold(
       appBar: AppBar(
@@ -31,19 +33,32 @@ class TextToAudioScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          
           Expanded(
             flex: 2,
             child: Stack(
               children: [
-                // Image in the top half
                 Positioned.fill(
                   child: Image.network(
                     image,
                     fit: BoxFit.cover,
                   ),
                 ),
-                // Play, Pause, Resume buttons
+                Positioned(
+                  top: 20,
+                  right: 20,
+                  child: Obx(() {
+                    final isFavorite = storyController.isFavorite.value;
+                    return IconButton(
+                      icon: Icon(
+                        isFavorite ? Icons.favorite : Icons.favorite_border,
+                        color: Colors.red,
+                      ),
+                      onPressed: () {
+                        storyController.toggleFavorite(storyId, title, description, image);
+                      },
+                    );
+                  }),
+                ),
                 Positioned(
                   bottom: 20,
                   left: 20,
@@ -66,7 +81,6 @@ class TextToAudioScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Like and Dislike buttons on the right side
                 Positioned(
                   right: 20,
                   bottom: 20,
@@ -112,7 +126,6 @@ class TextToAudioScreen extends StatelessWidget {
               ],
             ),
           ),
-          // Bottom half of the screen with highlighted text
           Expanded(
             flex: 1,
             child: Obx(() {
