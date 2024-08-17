@@ -1,4 +1,4 @@
-# aitravelplanner
+# the narator
 
 A new Flutter project.
 
